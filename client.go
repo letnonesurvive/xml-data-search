@@ -35,9 +35,9 @@ type SearchErrorResponse struct {
 }
 
 const (
-	OrderByAsc  = -1
-	OrderByAsIs = 0
-	OrderByDesc = 1
+	OrderByAsc  = -1 // по возрастанию
+	OrderByAsIs = 0  // как есть
+	OrderByDesc = 1  // по убыванию
 
 	ErrorBadOrderField = `OrderField invalid`
 )
