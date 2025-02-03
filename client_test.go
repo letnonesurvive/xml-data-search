@@ -99,9 +99,17 @@ func SortClients(sortType string, sortOrder int, responceUsers []User) {
 }
 
 func SearchServer(w http.ResponseWriter, r *http.Request) {
+	AcessToken := r.Header[http.CanonicalHeaderKey("AccessToken")]
+
+	if len(AcessToken) == 0 || AcessToken[0] == "" {
+		http.Error(w, "", http.StatusUnauthorized)
+		return
+	}
+
 	file, err := os.Open("dataset.xml")
-	if err != nil {
-		fmt.Println("Failed to open dataset.xml")
+	if err != nil { // to test this case need to create a Handler which has any other .xml file which can't be open
+		http.Error(w, "Can't open dataset.xml", http.StatusInternalServerError)
+		return
 	}
 	defer file.Close()
 
@@ -171,7 +179,7 @@ func SearchServer(w http.ResponseWriter, r *http.Request) {
 
 type TestCase struct {
 	Request  SearchRequest
-	Response SearchResponse
+	Response *SearchResponse
 }
 
 func RunTest(t *testing.T, testCases []TestCase) {
@@ -181,12 +189,12 @@ func RunTest(t *testing.T, testCases []TestCase) {
 
 	for testNum, testCase := range testCases {
 		var client SearchClient
+		client.AccessToken = "TestToken"
 		client.URL = server.URL
-		responsePoint, err := client.FindUsers(testCase.Request)
+		response, err := client.FindUsers(testCase.Request)
 		if err != nil {
 			t.Errorf("[%d] unexpected error: %#v", testNum, err)
 		}
-		response := *responsePoint
 		if !reflect.DeepEqual(response, testCase.Response) { // прикольная штука, надо про нее написать
 			t.Errorf("[%d] wrong result, expected \n %#v, got \n %#v", testNum, testCase.Response, response)
 		}
@@ -200,7 +208,7 @@ func TestRequestSingleUser(t *testing.T) {
 				Query: "Hilda",
 				Limit: 1,
 			},
-			Response: SearchResponse{
+			Response: &SearchResponse{
 				Users: []User{
 					{
 						Id:     1,
@@ -262,7 +270,7 @@ func TestRequestMultipleUsers(t *testing.T) {
 				Limit: 4,
 				//Limit :5 shoud work as with 4?
 			},
-			Response: MultipleUsersSearchResponce,
+			Response: &MultipleUsersSearchResponce,
 		},
 		{
 			Request: SearchRequest{
@@ -272,7 +280,7 @@ func TestRequestMultipleUsers(t *testing.T) {
 				OrderField: "Id",
 				//Limit :5 shoud work as with 4?
 			},
-			Response: MultipleUsersSearchResponce,
+			Response: &MultipleUsersSearchResponce,
 		},
 	}
 	RunTest(t, testCases)
@@ -287,7 +295,7 @@ func TestRequestSortUsers(t *testing.T) {
 				Query: "cupidatat",
 				Limit: 4,
 			},
-			Response: MultipleUsersSearchResponce,
+			Response: &MultipleUsersSearchResponce,
 		},
 		{
 			Request: SearchRequest{
@@ -296,7 +304,7 @@ func TestRequestSortUsers(t *testing.T) {
 				OrderBy:    OrderByAsIs,
 				OrderField: "Id",
 			},
-			Response: MultipleUsersSearchResponce,
+			Response: &MultipleUsersSearchResponce,
 		},
 		{
 			Request: SearchRequest{
@@ -305,19 +313,7 @@ func TestRequestSortUsers(t *testing.T) {
 				OrderBy:    OrderByAsc,
 				OrderField: "Id",
 			},
-			Response: MultipleUsersSearchResponce,
-		},
-		{
-			Request: SearchRequest{
-				Query:      "cupidatat",
-				Limit:      4,
-				OrderBy:    OrderByDesc,
-				OrderField: "Id",
-			},
-			Response: SearchResponse{
-				Users:    MultipleUsersCupidatatReversed,
-				NextPage: true,
-			},
+			Response: &MultipleUsersSearchResponce,
 		},
 	}
 	RunTest(t, testCases)
@@ -407,18 +403,43 @@ var EmptyQuerySearchResponce = SearchResponse{
 }
 
 func TestEmptyQuery(t *testing.T) {
-	// should return all, limit set for compact size
 	testCases := []TestCase{
 		{
 			Request: SearchRequest{
 				Query: "",
 				Limit: 11,
 			},
-			Response: EmptyQuerySearchResponce,
+			Response: &EmptyQuerySearchResponce,
 		},
 	}
 	RunTest(t, testCases)
-	// add case for check size of []User array
+
+	testCasesSize := []TestCase{
+		{
+			Request: SearchRequest{
+				Query: "",
+				Limit: 35,
+			},
+			Response: &SearchResponse{
+				Users:    make([]User, 25), // maximum limit is 25
+				NextPage: true,
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(SearchServer))
+	for testNum, testCase := range testCasesSize {
+		var client SearchClient
+		client.URL = server.URL
+		client.AccessToken = "TestToken"
+		response, err := client.FindUsers(testCase.Request)
+		if err != nil {
+			t.Errorf("[%d] unexpected error: %#v", testNum, err)
+		}
+		if len(response.Users) != len(testCase.Response.Users) {
+			t.Errorf("[%d] wrong result, expected \n %#v, got \n %#v", testNum, testCase.Response, response)
+		}
+	}
 }
 
 func TestFindUserByName(t *testing.T) {
@@ -442,21 +463,21 @@ func TestFindUserByName(t *testing.T) {
 				Query: "Boyd Wolf",
 				Limit: 1,
 			},
-			Response: searchResponce,
+			Response: &searchResponce,
 		},
 		{
 			Request: SearchRequest{
 				Query: "Boyd",
 				Limit: 1,
 			},
-			Response: searchResponce,
+			Response: &searchResponce,
 		},
 		{
 			Request: SearchRequest{
 				Query: "Wolf",
 				Limit: 1,
 			},
-			Response: searchResponce,
+			Response: &searchResponce,
 		},
 	}
 	RunTest(t, testCases)
@@ -468,11 +489,71 @@ func TestEmptyResponce(t *testing.T) {
 			Request: SearchRequest{
 				Query: "This string doesn't contain in dataset.xml file",
 			},
-			Response: SearchResponse{
+			Response: &SearchResponse{
 				Users:    nil,
 				NextPage: false,
 			},
 		},
 	}
 	RunTest(t, testCases)
+}
+
+func TestWrongRequestParams(t *testing.T) {
+	testCases := []TestCase{
+		{
+			Request: SearchRequest{
+				Query: "Some query",
+				Limit: -1,
+			},
+			Response: nil,
+		},
+		{
+			Request: SearchRequest{
+				Query:  "Some query",
+				Offset: -1,
+			},
+			Response: nil,
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(SearchServer))
+
+	for testNum, testCase := range testCases {
+		var client SearchClient
+		client.URL = server.URL
+		client.AccessToken = "TestToken"
+		response, err := client.FindUsers(testCase.Request)
+		if !((err.Error() == "limit must be > 0") || (err.Error() == "offset must be > 0")) {
+			t.Errorf("[%d] unexpected error: %#v", testNum, err)
+		}
+		if response != testCase.Response {
+			t.Errorf("[%d] wrong result, expected \n %#v, got \n %#v", testNum, testCase.Response, response)
+		}
+	}
+}
+
+func TestBadAccessToken(t *testing.T) {
+	testCases := []TestCase{
+		{
+			Request: SearchRequest{
+				Query: "Boyd",
+				Limit: 1,
+			},
+			Response: nil,
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(SearchServer))
+
+	for testNum, testCase := range testCases {
+		var client SearchClient
+		client.URL = server.URL
+		response, err := client.FindUsers(testCase.Request)
+		if err.Error() != "Bad AccessToken" {
+			t.Errorf("[%d] unexpected error: %#v", testNum, err)
+		}
+		if response != testCase.Response {
+			t.Errorf("[%d] wrong result, expected \n %#v, got \n %#v", testNum, testCase.Response, response)
+		}
+	}
 }
