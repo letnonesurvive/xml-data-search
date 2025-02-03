@@ -8,10 +8,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 type XMLClient struct {
@@ -108,10 +110,7 @@ func SearchServer(w http.ResponseWriter, r *http.Request) {
 	decoder.Decode(&clients)
 
 	query := r.FormValue("query")
-	if len(query) == 0 {
-		fmt.Println("query is empty")
-		return
-	}
+
 	var responceUsers []User
 	for _, client := range clients.Clients {
 		Name := client.FirstName + " " + client.LastName
@@ -175,6 +174,25 @@ type TestCase struct {
 	Response SearchResponse
 }
 
+func RunTest(t *testing.T, testCases []TestCase) {
+	server := httptest.NewServer(http.HandlerFunc(SearchServer))
+	server.Config.ReadTimeout = 1000 * time.Second
+	server.Config.WriteTimeout = 1000 * time.Second
+
+	for testNum, testCase := range testCases {
+		var client SearchClient
+		client.URL = server.URL
+		responsePoint, err := client.FindUsers(testCase.Request)
+		if err != nil {
+			t.Errorf("[%d] unexpected error: %#v", testNum, err)
+		}
+		response := *responsePoint
+		if !reflect.DeepEqual(response, testCase.Response) { // прикольная штука, надо про нее написать
+			t.Errorf("[%d] wrong result, expected \n %#v, got \n %#v", testNum, testCase.Response, response)
+		}
+	}
+}
+
 func TestRequestSingleUser(t *testing.T) {
 	testCases := []TestCase{
 		{
@@ -197,18 +215,207 @@ func TestRequestSingleUser(t *testing.T) {
 		},
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(SearchServer))
+	RunTest(t, testCases)
+}
 
-	for testNum, testCase := range testCases {
-		var client SearchClient
-		client.URL = server.URL
-		responsePoint, err := client.FindUsers(testCase.Request)
-		if err != nil {
-			t.Errorf("[%d] unexpected error: %#v", testNum, err)
-		}
-		response := *responsePoint
-		if !reflect.DeepEqual(response, testCase.Response) { // прикольная штука, надо про нее написать
-			t.Errorf("[%d] wrong result, expected %#v, got %#v", testNum, testCase.Response, response)
-		}
+var MultipleUsersCupidatat = []User{
+	{
+		Id:     0,
+		Name:   "Boyd Wolf",
+		Age:    22,
+		About:  "Nulla cillum enim voluptate consequat laborum esse excepteur occaecat commodo nostrud excepteur ut cupidatat. Occaecat minim incididunt ut proident ad sint nostrud ad laborum sint pariatur. Ut nulla commodo dolore officia. Consequat anim eiusmod amet commodo eiusmod deserunt culpa. Ea sit dolore nostrud cillum proident nisi mollit est Lorem pariatur. Lorem aute officia deserunt dolor nisi aliqua consequat nulla nostrud ipsum irure id deserunt dolore. Minim reprehenderit nulla exercitation labore ipsum.\n",
+		Gender: "male",
+	},
+	{
+		Id:     1,
+		Name:   "Hilda Mayer",
+		Age:    21,
+		About:  "Sit commodo consectetur minim amet ex. Elit aute mollit fugiat labore sint ipsum dolor cupidatat qui reprehenderit. Eu nisi in exercitation culpa sint aliqua nulla nulla proident eu. Nisi reprehenderit anim cupidatat dolor incididunt laboris mollit magna commodo ex. Cupidatat sit id aliqua amet nisi et voluptate voluptate commodo ex eiusmod et nulla velit.\n",
+		Gender: "female",
+	},
+	{
+		Id:     5,
+		Name:   "Beulah Stark",
+		Age:    30,
+		About:  "Enim cillum eu cillum velit labore. In sint esse nulla occaecat voluptate pariatur aliqua aliqua non officia nulla aliqua. Fugiat nostrud irure officia minim cupidatat laborum ad incididunt dolore. Fugiat nostrud eiusmod ex ea nulla commodo. Reprehenderit sint qui anim non ad id adipisicing qui officia Lorem.\n",
+		Gender: "female",
+	},
+	{
+		Id:     6,
+		Name:   "Jennings Mays",
+		Age:    39,
+		About:  "Veniam consectetur non non aliquip exercitation quis qui. Aliquip duis ut ad commodo consequat ipsum cupidatat id anim voluptate deserunt enim laboris. Sunt nostrud voluptate do est tempor esse anim pariatur. Ea do amet Lorem in mollit ipsum irure Lorem exercitation. Exercitation deserunt adipisicing nulla aute ex amet sint tempor incididunt magna. Quis et consectetur dolor nulla reprehenderit culpa laboris voluptate ut mollit. Qui ipsum nisi ullamco sit exercitation nisi magna fugiat anim consectetur officia.\n",
+		Gender: "male",
+	},
+}
+
+var MultipleUsersSearchResponce = SearchResponse{
+	Users:    MultipleUsersCupidatat,
+	NextPage: true,
+}
+
+func TestRequestMultipleUsers(t *testing.T) {
+	testCases := []TestCase{
+		{
+			Request: SearchRequest{
+				Query: "cupidatat",
+				Limit: 4,
+				//Limit :5 shoud work as with 4?
+			},
+			Response: MultipleUsersSearchResponce,
+		},
+		{
+			Request: SearchRequest{
+				Query:      "cupidatat",
+				Limit:      4,
+				OrderBy:    OrderByAsIs,
+				OrderField: "Id",
+				//Limit :5 shoud work as with 4?
+			},
+			Response: MultipleUsersSearchResponce,
+		},
 	}
+	RunTest(t, testCases)
+}
+
+func TestRequestSortUsers(t *testing.T) {
+	var MultipleUsersCupidatatReversed = slices.Clone(MultipleUsersCupidatat)
+	slices.Reverse(MultipleUsersCupidatatReversed)
+	testCases := []TestCase{
+		{
+			Request: SearchRequest{
+				Query: "cupidatat",
+				Limit: 4,
+			},
+			Response: MultipleUsersSearchResponce,
+		},
+		{
+			Request: SearchRequest{
+				Query:      "cupidatat",
+				Limit:      4,
+				OrderBy:    OrderByAsIs,
+				OrderField: "Id",
+			},
+			Response: MultipleUsersSearchResponce,
+		},
+		{
+			Request: SearchRequest{
+				Query:      "cupidatat",
+				Limit:      4,
+				OrderBy:    OrderByAsc,
+				OrderField: "Id",
+			},
+			Response: MultipleUsersSearchResponce,
+		},
+		{
+			Request: SearchRequest{
+				Query:      "cupidatat",
+				Limit:      4,
+				OrderBy:    OrderByDesc,
+				OrderField: "Id",
+			},
+			Response: SearchResponse{
+				Users:    MultipleUsersCupidatatReversed,
+				NextPage: true,
+			},
+		},
+	}
+	RunTest(t, testCases)
+}
+
+var EmptyQuerySearchResponce = SearchResponse{
+	Users: []User{
+		{
+			Id:     0,
+			Name:   "Boyd Wolf",
+			Age:    22,
+			About:  "Nulla cillum enim voluptate consequat laborum esse excepteur occaecat commodo nostrud excepteur ut cupidatat. Occaecat minim incididunt ut proident ad sint nostrud ad laborum sint pariatur. Ut nulla commodo dolore officia. Consequat anim eiusmod amet commodo eiusmod deserunt culpa. Ea sit dolore nostrud cillum proident nisi mollit est Lorem pariatur. Lorem aute officia deserunt dolor nisi aliqua consequat nulla nostrud ipsum irure id deserunt dolore. Minim reprehenderit nulla exercitation labore ipsum.\n",
+			Gender: "male",
+		},
+		{
+			Id:     1,
+			Name:   "Hilda Mayer",
+			Age:    21,
+			About:  "Sit commodo consectetur minim amet ex. Elit aute mollit fugiat labore sint ipsum dolor cupidatat qui reprehenderit. Eu nisi in exercitation culpa sint aliqua nulla nulla proident eu. Nisi reprehenderit anim cupidatat dolor incididunt laboris mollit magna commodo ex. Cupidatat sit id aliqua amet nisi et voluptate voluptate commodo ex eiusmod et nulla velit.\n",
+			Gender: "female",
+		},
+		{
+			Id:     2,
+			Name:   "Brooks Aguilar",
+			Age:    25,
+			About:  "Velit ullamco est aliqua voluptate nisi do. Voluptate magna anim qui cillum aliqua sint veniam reprehenderit consectetur enim. Laborum dolore ut eiusmod ipsum ad anim est do tempor culpa ad do tempor. Nulla id aliqua dolore dolore adipisicing.\n",
+			Gender: "male",
+		},
+		{
+			Id:     3,
+			Name:   "Everett Dillard",
+			Age:    27,
+			About:  "Sint eu id sint irure officia amet cillum. Amet consectetur enim mollit culpa laborum ipsum adipisicing est laboris. Adipisicing fugiat esse dolore aliquip quis laborum aliquip dolore. Pariatur do elit eu nostrud occaecat.\n",
+			Gender: "male",
+		},
+		{
+			Id:     4,
+			Name:   "Owen Lynn",
+			Age:    30,
+			About:  "Elit anim elit eu et deserunt veniam laborum commodo irure nisi ut labore reprehenderit fugiat. Ipsum adipisicing labore ullamco occaecat ut. Ea deserunt ad dolor eiusmod aute non enim adipisicing sit ullamco est ullamco. Elit in proident pariatur elit ullamco quis. Exercitation amet nisi fugiat voluptate esse sit et consequat sit pariatur labore et.\n",
+			Gender: "male",
+		},
+		{
+			Id:     5,
+			Name:   "Beulah Stark",
+			Age:    30,
+			About:  "Enim cillum eu cillum velit labore. In sint esse nulla occaecat voluptate pariatur aliqua aliqua non officia nulla aliqua. Fugiat nostrud irure officia minim cupidatat laborum ad incididunt dolore. Fugiat nostrud eiusmod ex ea nulla commodo. Reprehenderit sint qui anim non ad id adipisicing qui officia Lorem.\n",
+			Gender: "female",
+		},
+		{
+			Id:     6,
+			Name:   "Jennings Mays",
+			Age:    39,
+			About:  "Veniam consectetur non non aliquip exercitation quis qui. Aliquip duis ut ad commodo consequat ipsum cupidatat id anim voluptate deserunt enim laboris. Sunt nostrud voluptate do est tempor esse anim pariatur. Ea do amet Lorem in mollit ipsum irure Lorem exercitation. Exercitation deserunt adipisicing nulla aute ex amet sint tempor incididunt magna. Quis et consectetur dolor nulla reprehenderit culpa laboris voluptate ut mollit. Qui ipsum nisi ullamco sit exercitation nisi magna fugiat anim consectetur officia.\n",
+			Gender: "male",
+		},
+		{
+			Id:     7,
+			Name:   "Leann Travis",
+			Age:    34,
+			About:  "Lorem magna dolore et velit ut officia. Cupidatat deserunt elit mollit amet nulla voluptate sit. Quis aute aliquip officia deserunt sint sint nisi. Laboris sit et ea dolore consequat laboris non. Consequat do enim excepteur qui mollit consectetur eiusmod laborum ut duis mollit dolor est. Excepteur amet duis enim laborum aliqua nulla ea minim.\n",
+			Gender: "female",
+		},
+		{
+			Id:     8,
+			Name:   "Glenn Jordan",
+			Age:    29,
+			About:  "Duis reprehenderit sit velit exercitation non aliqua magna quis ad excepteur anim. Eu cillum cupidatat sit magna cillum irure occaecat sunt officia officia deserunt irure. Cupidatat dolor cupidatat ipsum minim consequat Lorem adipisicing. Labore fugiat cupidatat nostrud voluptate ea eu pariatur non. Ipsum quis occaecat irure amet esse eu fugiat deserunt incididunt Lorem esse duis occaecat mollit.\n",
+			Gender: "male",
+		},
+		{
+			Id:     9,
+			Name:   "Rose Carney",
+			Age:    36,
+			About:  "Voluptate ipsum ad consequat elit ipsum tempor irure consectetur amet. Et veniam sunt in sunt ipsum non elit ullamco est est eu. Exercitation ipsum do deserunt do eu adipisicing id deserunt duis nulla ullamco eu. Ad duis voluptate amet quis commodo nostrud occaecat minim occaecat commodo. Irure sint incididunt est cupidatat laborum in duis enim nulla duis ut in ut. Cupidatat ex incididunt do ullamco do laboris eiusmod quis nostrud excepteur quis ea.\n",
+			Gender: "female",
+		},
+		{
+			Id:     10,
+			Name:   "Henderson Maxwell",
+			Age:    30,
+			About:  "Ex et excepteur anim in eiusmod. Cupidatat sunt aliquip exercitation velit minim aliqua ad ipsum cillum dolor do sit dolore cillum. Exercitation eu in ex qui voluptate fugiat amet.\n",
+			Gender: "male",
+		},
+	},
+	NextPage: true,
+}
+
+func TestEmptyQuery(t *testing.T) {
+	// should return all, limit set for compact size
+	testCases := []TestCase{
+		{
+			Request: SearchRequest{
+				Query: "",
+				Limit: 11,
+			},
+			Response: EmptyQuerySearchResponce,
+		},
+	}
+	RunTest(t, testCases)
 }
