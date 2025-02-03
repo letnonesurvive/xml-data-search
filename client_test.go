@@ -147,7 +147,7 @@ func SearchServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if offset < len(responceUsers) && offset >= 0 {
+	if offset < len(responceUsers)+1 && offset >= 0 {
 		responceUsers = responceUsers[offset:]
 	} else {
 		http.Error(w, "Wrong offset", http.StatusBadRequest)
@@ -415,6 +415,63 @@ func TestEmptyQuery(t *testing.T) {
 				Limit: 11,
 			},
 			Response: EmptyQuerySearchResponce,
+		},
+	}
+	RunTest(t, testCases)
+	// add case for check size of []User array
+}
+
+func TestFindUserByName(t *testing.T) {
+
+	searchResponce := SearchResponse{
+		Users: []User{
+			{
+				Id:     0,
+				Name:   "Boyd Wolf",
+				Age:    22,
+				About:  "Nulla cillum enim voluptate consequat laborum esse excepteur occaecat commodo nostrud excepteur ut cupidatat. Occaecat minim incididunt ut proident ad sint nostrud ad laborum sint pariatur. Ut nulla commodo dolore officia. Consequat anim eiusmod amet commodo eiusmod deserunt culpa. Ea sit dolore nostrud cillum proident nisi mollit est Lorem pariatur. Lorem aute officia deserunt dolor nisi aliqua consequat nulla nostrud ipsum irure id deserunt dolore. Minim reprehenderit nulla exercitation labore ipsum.\n",
+				Gender: "male",
+			},
+		},
+		NextPage: false,
+	}
+
+	testCases := []TestCase{
+		{
+			Request: SearchRequest{
+				Query: "Boyd Wolf",
+				Limit: 1,
+			},
+			Response: searchResponce,
+		},
+		{
+			Request: SearchRequest{
+				Query: "Boyd",
+				Limit: 1,
+			},
+			Response: searchResponce,
+		},
+		{
+			Request: SearchRequest{
+				Query: "Wolf",
+				Limit: 1,
+			},
+			Response: searchResponce,
+		},
+	}
+	RunTest(t, testCases)
+}
+
+func TestEmptyResponce(t *testing.T) {
+	testCases := []TestCase{
+		{
+			Request: SearchRequest{
+				Query: "This string doesn't contain in dataset.xml file",
+			},
+			Response: SearchResponse{
+				Users:    nil,
+				NextPage: false,
+			},
 		},
 	}
 	RunTest(t, testCases)
