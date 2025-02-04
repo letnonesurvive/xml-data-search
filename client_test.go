@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -38,6 +39,15 @@ type XMLClient struct {
 
 type Clients struct {
 	Clients []XMLClient `xml:"row"`
+}
+
+type Handler struct {
+	filename string
+	timeout  time.Duration
+}
+
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.SearchServer(w, r)
 }
 
 func SortAsc(sortType string, responceUsers []User) {
@@ -98,20 +108,24 @@ func SortClients(sortType string, sortOrder int, responceUsers []User) {
 	}
 }
 
-func SearchServer(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) SearchServer(w http.ResponseWriter, r *http.Request) {
 	AcessToken := r.Header[http.CanonicalHeaderKey("AccessToken")]
-
 	if len(AcessToken) == 0 || AcessToken[0] == "" {
 		http.Error(w, "", http.StatusUnauthorized)
 		return
 	}
 
-	file, err := os.Open("dataset.xml")
+	ctx, cancel := context.WithTimeout(r.Context(), h.timeout)
+	defer cancel()
+
+	file, err := os.Open(h.filename)
 	if err != nil { // to test this case need to create a Handler which has any other .xml file which can't be open
 		http.Error(w, "Can't open dataset.xml", http.StatusInternalServerError)
 		return
 	}
 	defer file.Close()
+
+	time.Sleep(500 * time.Millisecond)
 
 	decoder := xml.NewDecoder(file)
 	var clients Clients
@@ -169,12 +183,18 @@ func SearchServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(200)
-	bytes, err := json.Marshal(responceUsers)
-	if err != nil {
-		fmt.Println("Unable to marshall users to json")
+	select {
+	case <-ctx.Done():
+		fmt.Println("Hello")
+		http.Error(w, "Timeout", http.StatusRequestTimeout)
+	default:
+		w.WriteHeader(200)
+		bytes, err := json.Marshal(responceUsers)
+		if err != nil {
+			fmt.Println("Unable to marshall users to json")
+		}
+		w.Write(bytes)
 	}
-	w.Write(bytes)
 }
 
 type TestCase struct {
@@ -183,10 +203,9 @@ type TestCase struct {
 }
 
 func RunTest(t *testing.T, testCases []TestCase) {
-	server := httptest.NewServer(http.HandlerFunc(SearchServer))
-	server.Config.ReadTimeout = 1000 * time.Second
-	server.Config.WriteTimeout = 1000 * time.Second
 
+	handler := &Handler{filename: "dataset.xml", timeout: 30 * time.Second}
+	server := httptest.NewServer(handler)
 	for testNum, testCase := range testCases {
 		var client SearchClient
 		client.AccessToken = "TestToken"
@@ -427,7 +446,9 @@ func TestEmptyQuery(t *testing.T) {
 		},
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(SearchServer))
+	handler := &Handler{filename: "dataset.xml", timeout: 1000 * time.Second}
+	server := httptest.NewServer(handler)
+
 	for testNum, testCase := range testCasesSize {
 		var client SearchClient
 		client.URL = server.URL
@@ -516,7 +537,8 @@ func TestWrongRequestParams(t *testing.T) {
 		},
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(SearchServer))
+	handler := &Handler{filename: "dataset.xml"}
+	server := httptest.NewServer(handler)
 
 	for testNum, testCase := range testCases {
 		var client SearchClient
@@ -543,7 +565,8 @@ func TestBadAccessToken(t *testing.T) {
 		},
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(SearchServer))
+	handler := &Handler{filename: "dataset.xml"}
+	server := httptest.NewServer(handler)
 
 	for testNum, testCase := range testCases {
 		var client SearchClient
@@ -553,6 +576,59 @@ func TestBadAccessToken(t *testing.T) {
 			t.Errorf("[%d] unexpected error: %#v", testNum, err)
 		}
 		if response != testCase.Response {
+			t.Errorf("[%d] wrong result, expected \n %#v, got \n %#v", testNum, testCase.Response, response)
+		}
+	}
+}
+
+func TestInternalServerError(t *testing.T) {
+	testCases := []TestCase{
+		{
+			Request: SearchRequest{
+				Query: "Boyd",
+				Limit: 1,
+			},
+			Response: nil,
+		},
+	}
+	handler := &Handler{filename: "test.xml"}
+	server := httptest.NewServer(handler)
+
+	for testNum, testCase := range testCases {
+		var client SearchClient
+		client.URL = server.URL
+		client.AccessToken = "TestToken"
+		response, err := client.FindUsers(testCase.Request)
+		if err.Error() != "SearchServer fatal error" {
+			t.Errorf("[%d] unexpected error: %#v", testNum, err)
+		}
+		if response != testCase.Response {
+			t.Errorf("[%d] wrong result, expected \n %#v, got \n %#v", testNum, testCase.Response, response)
+		}
+	}
+}
+
+func TestTimeOut(t *testing.T) {
+	testCases := []TestCase{
+		{
+			Request: SearchRequest{
+				Query: "Boyd",
+				Limit: 1,
+			},
+			Response: nil,
+		},
+	}
+	handler := &Handler{filename: "dataset.xml", timeout: 1 * time.Millisecond}
+	server := httptest.NewServer(handler)
+
+	for testNum, testCase := range testCases {
+		var client SearchClient
+		client.URL = server.URL
+		client.AccessToken = "TestToken"
+		response, err := client.FindUsers(testCase.Request)
+		Error := err.Error()
+		fmt.Println(Error)
+		if response != nil || !strings.Contains(Error, "timeout") {
 			t.Errorf("[%d] wrong result, expected \n %#v, got \n %#v", testNum, testCase.Response, response)
 		}
 	}
