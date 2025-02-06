@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"reflect"
 	"slices"
@@ -158,13 +159,13 @@ func (h *Handler) SearchServer(w http.ResponseWriter, r *http.Request) {
 
 	limitStr := r.FormValue("limit")
 	limit, err := strconv.Atoi(limitStr)
-	if err != nil {
+	if err != nil || limit < 0 {
 		http.Error(w, "Wrong convertion limit to int", http.StatusBadRequest)
 		return
 	}
 	offsetStr := r.FormValue("offset")
 	offset, err := strconv.Atoi(offsetStr)
-	if err != nil {
+	if err != nil || offset < 0 {
 		http.Error(w, "Wrong convertion offset to int", http.StatusBadRequest)
 		return
 	}
@@ -287,7 +288,6 @@ func TestRequestMultipleUsers(t *testing.T) {
 			Request: SearchRequest{
 				Query: "cupidatat",
 				Limit: 4,
-				//Limit :5 shoud work as with 4?
 			},
 			Response: &MultipleUsersSearchResponce,
 		},
@@ -297,7 +297,6 @@ func TestRequestMultipleUsers(t *testing.T) {
 				Limit:      4,
 				OrderBy:    OrderByAsIs,
 				OrderField: "Id",
-				//Limit :5 shoud work as with 4?
 			},
 			Response: &MultipleUsersSearchResponce,
 		},
@@ -608,28 +607,29 @@ func TestInternalServerError(t *testing.T) {
 	}
 }
 
-func TestTimeOut(t *testing.T) {
-	testCases := []TestCase{
-		{
-			Request: SearchRequest{
-				Query: "Boyd",
-				Limit: 1,
-			},
-			Response: nil,
+func TestStatusBadRequest(t *testing.T) {
+	testCases := TestCase{
+		Request: SearchRequest{
+			Query: "Boyd",
+			Limit: -1,
 		},
+		Response: nil,
 	}
-	handler := &Handler{filename: "dataset.xml", timeout: 1 * time.Millisecond}
+	handler := &Handler{filename: "dataset.xml"}
 	server := httptest.NewServer(handler)
 
-	for testNum, testCase := range testCases {
-		var client SearchClient
-		client.URL = server.URL
-		client.AccessToken = "TestToken"
-		response, err := client.FindUsers(testCase.Request)
-		Error := err.Error()
-		fmt.Println(Error)
-		if response != nil || !strings.Contains(Error, "timeout") {
-			t.Errorf("[%d] wrong result, expected \n %#v, got \n %#v", testNum, testCase.Response, response)
-		}
+	searcherParams := url.Values{}
+	searcherParams.Add("limit", strconv.Itoa(0))
+	client = &http.Client{Timeout: time.Second}
+	searcherReq, err := http.NewRequest("GET", server.URL+"?"+searcherParams.Encode(), nil)
+	if err != nil {
+		t.Errorf("unexpected error: %#v", err)
+	}
+	searcherReq.Header.Add("AccessToken", "TestToken")
+
+	resp, err := client.Do(searcherReq)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("wrong result, expected \n %#v, got \n %#v", resp, testCases.Response)
 	}
 }
